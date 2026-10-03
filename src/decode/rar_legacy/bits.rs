@@ -234,12 +234,49 @@ impl StreamingBitReader {
     }
 }
 
+impl From<StreamingBitReadError> for BitReadError {
+    fn from(error: StreamingBitReadError) -> Self {
+        match error {
+            StreamingBitReadError::NeedMoreInput { needed, byte_index, bit_off } =>
+                Self::NeedMoreInput { needed, byte_index, bit_off },
+            StreamingBitReadError::UnexpectedEof { needed, byte_index, bit_off } =>
+                Self::UnexpectedEof { needed, byte_index, bit_off },
+        }
+    }
+}
+
 /// Common bit-input operations used by the RAR3 Huffman/LZ pipeline.
 pub trait BitRead {
     fn peek_bits(&mut self, n: u32) -> Result<u32, BitReadError>;
     fn consume_bits(&mut self, n: u32) -> Result<(), BitReadError>;
     fn read_bits(&mut self, n: u32) -> Result<u32, BitReadError>;
     fn align_to_byte(&mut self);
+}
+
+impl BitRead for StreamingBitReader {
+    fn peek_bits(&mut self, n: u32) -> Result<u32, BitReadError> {
+        StreamingBitReader::peek_bits(self, n).map_err(Into::into)
+    }
+    fn consume_bits(&mut self, n: u32) -> Result<(), BitReadError> {
+        StreamingBitReader::consume_bits(self, n).map_err(Into::into)
+    }
+    fn read_bits(&mut self, n: u32) -> Result<u32, BitReadError> {
+        StreamingBitReader::read_bits(self, n).map_err(Into::into)
+    }
+    fn align_to_byte(&mut self) { StreamingBitReader::align_to_byte(self); }
+}
+
+impl<'a> BitRead for BitReader<'a> {
+    fn peek_bits(&mut self, n: u32) -> Result<u32, BitReadError> {
+        BitReader::peek_bits(self, n)
+    }
+    fn consume_bits(&mut self, n: u32) -> Result<(), BitReadError> {
+        BitReader::consume_bits(self, n)
+    }
+    fn read_bits(&mut self, n: u32) -> Result<u32, BitReadError> {
+        BitReader::read_bits(self, n)
+    }
+    fn align_to_byte(&mut self) { BitReader::align_to_byte(self); }
 }
 
 /// MSB-first bit reader over a borrowed byte slice.
