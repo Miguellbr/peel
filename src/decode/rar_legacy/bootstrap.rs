@@ -42,7 +42,7 @@
 
 use thiserror::Error;
 
-use super::bits::{BitReadError, BitReader};
+use super::bits::{BitRead, BitReadError};
 use super::huffman::{HuffmanCode, HuffmanError};
 
 /// Number of literal/length symbols in the main code
@@ -127,8 +127,8 @@ pub struct MainTables {
 ///
 /// - [`BootstrapError::Underrun`] if the bitstream runs out
 ///   before all 20 entries are filled.
-pub fn read_precode_lengths(
-    reader: &mut BitReader<'_>,
+pub fn read_precode_lengths<R: BitRead>(
+    reader: &mut R,
 ) -> Result<[u8; PRECODE_SIZE], BootstrapError> {
     let mut lens = [0u8; PRECODE_SIZE];
     let mut i = 0usize;
@@ -194,8 +194,8 @@ pub fn read_precode_lengths(
 ///   opcode lands at `i == 0`.
 /// - [`BootstrapError::InvalidPrecodeSymbol`] if `precode`
 ///   decodes a symbol outside `0..=19`.
-pub fn read_main_lengths(
-    reader: &mut BitReader<'_>,
+pub fn read_main_lengths<R: BitRead>(
+    reader: &mut R,
     precode: &HuffmanCode,
     lengths: &mut [u8; MAIN_TABLE_TOTAL],
 ) -> Result<(), BootstrapError> {
