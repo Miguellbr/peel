@@ -234,6 +234,14 @@ impl StreamingBitReader {
     }
 }
 
+/// Common bit-input operations used by the RAR3 Huffman/LZ pipeline.
+pub trait BitRead {
+    fn peek_bits(&mut self, n: u32) -> Result<u32, BitReadError>;
+    fn consume_bits(&mut self, n: u32) -> Result<(), BitReadError>;
+    fn read_bits(&mut self, n: u32) -> Result<u32, BitReadError>;
+    fn align_to_byte(&mut self);
+}
+
 /// MSB-first bit reader over a borrowed byte slice.
 ///
 /// Holds a 64-bit accumulator with the next-to-read bit at bit
