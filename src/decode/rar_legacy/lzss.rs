@@ -26,7 +26,7 @@
 
 use thiserror::Error;
 
-use super::bits::{BitReadError, BitReader};
+use super::bits::{BitRead, BitReadError};
 use super::bootstrap::MainTables;
 use super::dict::{Dict, DictError};
 use super::dist_cache::DistCache;
@@ -206,9 +206,9 @@ impl LzDecoder {
     /// - [`LzError::Dict`] if a back-reference was malformed.
     /// - [`LzError::InvalidSymbol`] if the length / offset /
     ///   lowoffset sub-alphabets emitted an out-of-range value.
-    pub fn decode_block(
+    pub fn decode_block<R: BitRead>(
         &mut self,
-        reader: &mut BitReader<'_>,
+        reader: &mut R,
         tables: &MainTables,
         out: &mut Vec<u8>,
     ) -> Result<BlockEnd, LzError> {
