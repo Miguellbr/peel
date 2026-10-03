@@ -714,4 +714,75 @@ mod tests {
         assert_eq!(br.read_bits(18).unwrap(), 0x2A_3F1);
         assert_eq!(br.read_bits(1).unwrap(), 1);
     }
+    #[test]
+    fn streaming_reader_can_resume_after_chunk_boundary() {
+        let mut br = StreamingBitReader::new();
+        br.append(&[0xAB]);
+        assert!(matches!(
+            br.read_bits(12),
+            Err(StreamingBitReadError::NeedMoreInput { needed: 4, .. })
+        ));
+        assert_eq!(br.bits_consumed(), 0);
+
+        br.append(&[0xCD]);
+        assert_eq!(br.read_bits(12).unwrap(), 0xABC);
+        assert_eq!(br.read_bits(4).unwrap(), 0xD);
+        assert_eq!(br.bits_consumed(), 16);
+    }
+
+    #[test]
+    fn streaming_peek_does_not_consume_when_input_is_short() {
+        let mut br = StreamingBitReader::new();
+        br.append(&[0xCA]);
+        assert!(matches!(
+            br.peek_bits(12),
+            Err(StreamingBitReadError::NeedMoreInput { needed: 4, .. })
+        ));
+        assert_eq!(br.bits_consumed(), 0);
+
+        br.append(&[0xFE]);
+        assert_eq!(br.peek_bits(12).unwrap(), 0xCAF);
+        assert_eq!(br.bits_consumed(), 0);
+        assert_eq!(br.read_bits(12).unwrap(), 0xCAF);
+    }
+
+    #[test]
+    fn streaming_finish_turns_need_more_input_into_eof() {
+        let mut br = StreamingBitReader::new();
+        br.append(&[0xFF]);
+        assert!(matches!(
+            br.read_bits(16),
+            Err(StreamingBitReadError::NeedMoreInput { needed: 8, .. })
+        ));
+        br.finish();
+        assert!(matches!(
+            br.read_bits(16),
+            Err(StreamingBitReadError::UnexpectedEof { needed: 8, .. })
+        ));
+    }
+
+    #[test]
+    fn streaming_reader_handles_many_small_chunks() {
+        let mut br = StreamingBitReader::new();
+        for byte in [0x12u8, 0x34, 0x56] {
+            br.append(&[byte]);
+        }
+
+        assert_eq!(br.read_bits(3).unwrap(), 0b000);
+        assert_eq!(br.read_bits(5).unwrap(), 0b10_010);
+        assert_eq!(br.read_bits(8).unwrap(), 0x34);
+        assert_eq!(br.read_bits(8).unwrap(), 0x56);
+        assert_eq!(br.bits_consumed(), 24);
+    }
+
+    #[test]
+    fn streaming_alignment_does_not_need_a_new_chunk() {
+        let mut br = StreamingBitReader::new();
+        br.append(&[0xAB, 0xCD]);
+        assert_eq!(br.read_bits(3).unwrap(), 0b101);
+        br.align_to_byte();
+        assert_eq!(br.bits_consumed(), 8);
+        assert_eq!(br.read_bits(8).unwrap(), 0xCD);
+    }
+
 }
