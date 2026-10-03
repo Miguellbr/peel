@@ -78,6 +78,154 @@ pub enum BitReadError {
     },
 }
 
+/// Errors produced by StreamingBitReader.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum StreamingBitReadError {
+    /// The current input chunk ended before the requested bits were available.
+    /// The caller may append more input and retry the same read.
+    #[error(
+        "legacy RAR streaming bitstream needs {needed} more bits at byte {byte_index}, bit {bit_off}"
+    )]
+    NeedMoreInput {
+        needed: u32,
+        byte_index: u64,
+        bit_off: u8,
+    },
+
+    /// The producer declared end-of-stream before the requested bits arrived.
+    #[error(
+        "legacy RAR streaming bitstream ended with {needed} bits still needed at byte {byte_index}, bit {bit_off}"
+    )]
+    UnexpectedEof {
+        needed: u32,
+        byte_index: u64,
+        bit_off: u8,
+    },
+}
+
+/// Incremental MSB-first bit reader for a producer that supplies compressed
+/// bytes in chunks.
+///
+/// Unlike BitReader, this reader does not borrow one complete entry.
+/// append adds more bytes, while finish marks the producer's final chunk.
+/// A failed read never consumes bits, so the caller can append another chunk
+/// and retry the identical operation.
+pub struct StreamingBitReader {
+    data: std::collections::VecDeque<u8>,
+    acc: u64,
+    nbits: u32,
+    bits_consumed: u64,
+    finished: bool,
+}
+
+impl Default for StreamingBitReader {
+    fn default() -> Self { Self::new() }
+}
+
+impl StreamingBitReader {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            data: std::collections::VecDeque::new(),
+            acc: 0,
+            nbits: 0,
+            bits_consumed: 0,
+            finished: false,
+        }
+    }
+
+    /// Append the next compressed-input chunk.
+    pub fn append(&mut self, data: &[u8]) {
+        assert!(!self.finished, "cannot append after StreamingBitReader::finish");
+        self.data.extend(data.iter().copied());
+    }
+
+    /// Mark the input producer as finished.
+    pub fn finish(&mut self) { self.finished = true; }
+
+    #[must_use]
+    pub fn is_finished(&self) -> bool { self.finished }
+
+    #[must_use]
+    pub fn bits_consumed(&self) -> u64 { self.bits_consumed }
+
+    #[must_use]
+    pub fn byte_position(&self) -> (u64, u8) {
+        (self.bits_consumed / 8, (self.bits_consumed % 8) as u8)
+    }
+
+    #[must_use]
+    pub fn bits_available(&self) -> u64 {
+        u64::from(self.nbits).saturating_add((self.data.len() as u64).saturating_mul(8))
+    }
+
+    #[must_use]
+    pub fn is_at_end(&self) -> bool {
+        self.finished && self.nbits == 0 && self.data.is_empty()
+    }
+
+    fn ensure(&mut self, n: u32) {
+        debug_assert!(n <= MAX_BITS_PER_READ);
+        while self.nbits + 8 <= 64 && !self.data.is_empty() {
+            let byte = u64::from(self.data.pop_front().expect("queue checked non-empty"));
+            self.acc |= byte << (56 - self.nbits);
+            self.nbits += 8;
+            if self.nbits >= n { break; }
+        }
+    }
+
+    fn unavailable(&self, n: u32) -> StreamingBitReadError {
+        let (byte_index, bit_off) = self.byte_position();
+        let needed = n.saturating_sub(self.nbits);
+        if self.finished {
+            StreamingBitReadError::UnexpectedEof { needed, byte_index, bit_off }
+        } else {
+            StreamingBitReadError::NeedMoreInput { needed, byte_index, bit_off }
+        }
+    }
+
+    pub fn peek_bits(&mut self, n: u32) -> Result<u32, StreamingBitReadError> {
+        if n == 0 { return Ok(0); }
+        debug_assert!(n <= MAX_BITS_PER_READ);
+        self.ensure(n);
+        if self.nbits < n { return Err(self.unavailable(n)); }
+        Ok((self.acc >> (64 - n)) as u32)
+    }
+
+    pub fn consume_bits(&mut self, n: u32) -> Result<(), StreamingBitReadError> {
+        if n == 0 { return Ok(()); }
+        debug_assert!(n <= MAX_BITS_PER_READ);
+        self.ensure(n);
+        if self.nbits < n { return Err(self.unavailable(n)); }
+        self.acc <<= n;
+        self.nbits -= n;
+        self.bits_consumed = self.bits_consumed.saturating_add(u64::from(n));
+        Ok(())
+    }
+
+    pub fn read_bits(&mut self, n: u32) -> Result<u32, StreamingBitReadError> {
+        if n == 0 { return Ok(0); }
+        debug_assert!(n <= MAX_BITS_PER_READ);
+        self.ensure(n);
+        if self.nbits < n { return Err(self.unavailable(n)); }
+        let value = (self.acc >> (64 - n)) as u32;
+        self.acc <<= n;
+        self.nbits -= n;
+        self.bits_consumed = self.bits_consumed.saturating_add(u64::from(n));
+        Ok(value)
+    }
+
+    pub fn align_to_byte(&mut self) {
+        let off = (self.bits_consumed % 8) as u32;
+        if off == 0 { return; }
+        let to_drop = 8 - off;
+        debug_assert!(self.nbits >= to_drop);
+        self.acc <<= to_drop;
+        self.nbits -= to_drop;
+        self.bits_consumed = self.bits_consumed.saturating_add(u64::from(to_drop));
+    }
+}
+
 /// MSB-first bit reader over a borrowed byte slice.
 ///
 /// Holds a 64-bit accumulator with the next-to-read bit at bit
