@@ -57,6 +57,14 @@ pub const MAX_BITS_PER_READ: u32 = 32;
 /// Errors produced by [`BitReader`].
 #[derive(Debug, Error)]
 pub enum BitReadError {
+    /// More compressed input is required before this read can complete.
+    #[error("legacy RAR bitstream needs {needed} more bits at byte {byte_index}, bit {bit_off}")]
+    NeedMoreInput { needed: u32, byte_index: u64, bit_off: u8 },
+
+    /// The compressed input ended before this read could complete.
+    #[error("legacy RAR bitstream ended with {needed} bits still needed at byte {byte_index}, bit {bit_off}")]
+    UnexpectedEof { needed: u32, byte_index: u64, bit_off: u8 },
+
     /// The bitstream ran out of input before the requested number
     /// of bits could be assembled. Carries the cursor at the
     /// moment the underrun was observed so the upper layer can
