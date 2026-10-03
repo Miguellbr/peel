@@ -45,7 +45,7 @@
 
 use thiserror::Error;
 
-use super::bits::{BitReadError, BitReader};
+use super::bits::{BitRead, BitReadError};
 
 /// Maximum Huffman code length the decoder accepts. Legacy RAR
 /// caps codes at 15 bits (`MAX_SYMBOL_LENGTH = 0xF` in libarchive's
@@ -255,7 +255,7 @@ impl HuffmanCode {
     /// - [`HuffmanError::MissingPrefix`] when the peeked bits
     ///   landed on an unfilled entry (under-subscribed alphabet
     ///   or fully empty alphabet).
-    pub fn decode(&self, reader: &mut BitReader<'_>) -> Result<u16, HuffmanError> {
+    pub fn decode<R: BitRead>(&self, reader: &mut R) -> Result<u16, HuffmanError> {
         let peeked = reader.peek_bits(self.bits)?;
         if !self.populated {
             return Err(HuffmanError::MissingPrefix { peeked });
